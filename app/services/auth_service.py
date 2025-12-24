@@ -6,7 +6,7 @@ from google.oauth2 import id_token
 from google.auth.transport import requests
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 import secrets
 
 from app.config import settings
@@ -103,7 +103,7 @@ class AuthService:
         except JWTError:
             return None
     
-    async def register_user(self, id_token_string: str, device_id: Optional[str] = None) -> tuple[User, str]:
+    async def register_user(self, id_token_string: str, device_id: Optional[str] = None) -> Tuple[User, str]:
         """
         Register a new user with Google OAuth.
         
@@ -151,7 +151,7 @@ class AuthService:
         
         return user, access_token
     
-    async def login_user(self, id_token_string: str, device_id: Optional[str] = None) -> tuple[User, str]:
+    async def login_user(self, id_token_string: str, device_id: Optional[str] = None) -> Tuple[User, str]:
         """
         Login existing user with Google OAuth.
         
