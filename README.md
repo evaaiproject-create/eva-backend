@@ -11,15 +11,21 @@ Eva is a scalable, cloud-based backend system that provides:
 - **Firestore Storage** - Cloud-based data persistence with Google Firestore
 - **Cross-Device Sync** - Seamless experience across multiple devices
 - **Function Calling Framework** - Extensible system for adding new capabilities
+- **Real-Time Speech Services** - Speech-to-Text (STT) and Text-to-Speech (TTS)
+- **AI-Powered Conversations** - OpenAI-powered chat with memory management
+- **WebSocket Support** - Real-time bidirectional communication
 - **RESTful API** - Well-documented API for all operations
 
 ## Technology Stack
 
-- **Framework**: FastAPI (Python 3.8+)
+- **Framework**: FastAPI (Python 3.9+)
 - **Authentication**: Google OAuth 2.0
 - **Database**: Google Cloud Firestore
+- **Speech**: Google Cloud Speech-to-Text, Google Cloud Text-to-Speech, OpenAI Whisper
+- **AI**: OpenAI GPT models for conversations and memory summarization
+- **Real-Time**: WebSockets for duplex communication
 - **Security**: JWT tokens, Bearer authentication
-- **Deployment**: Can be deployed to any Python hosting service
+- **Deployment**: Docker, Google Cloud Run, or any Python hosting service
 
 ## Features
 
@@ -47,6 +53,34 @@ Eva is a scalable, cloud-based backend system that provides:
 - Function call history and analytics
 - Easy to extend with new functions
 
+### 🎤 Speech Services
+- **Speech-to-Text (STT)**: Convert audio to text
+  - OpenAI Whisper (robust in noisy environments)
+  - Google Cloud Speech-to-Text
+  - Modular engine switching
+- **Text-to-Speech (TTS)**: Convert text to audio
+  - Google Cloud TTS with neural voices
+  - Custom engine support (extendable)
+  - Multiple voice options
+
+### 🧠 Memory Management
+- **Short-Term Context**: Recent conversation history
+- **Long-Term Memory**: Persistent user preferences, facts, and goals
+- **AI Summarization**: Compress conversations to key facts
+- **Context Building**: Combine short and long-term memory for AI
+
+### 💬 AI Conversation
+- OpenAI GPT-powered responses
+- Context-aware conversations
+- Intent detection (acknowledgments, commands, interruptions)
+- Configurable AI parameters
+
+### 🔌 WebSocket API
+- Real-time bidirectional communication
+- Live audio streaming
+- Cross-device message sync
+- Interrupt handling for TTS playback
+
 ## Project Structure
 
 ```
@@ -60,18 +94,38 @@ Eva-v0.1/
 │   │   ├── __init__.py
 │   │   ├── auth_service.py    # Authentication logic
 │   │   ├── firestore_service.py  # Firestore operations
-│   │   └── function_service.py   # Function calling framework
+│   │   ├── function_service.py   # Function calling framework
+│   │   ├── stt_service.py     # Speech-to-Text service
+│   │   ├── tts_service.py     # Text-to-Speech service
+│   │   ├── memory_service.py  # Memory management
+│   │   └── conversation_service.py  # AI conversation
 │   ├── api/
 │   │   ├── __init__.py
 │   │   ├── auth.py            # Auth endpoints
 │   │   ├── users.py           # User management endpoints
 │   │   ├── sessions.py        # Session sync endpoints
-│   │   └── functions.py       # Function calling endpoints
+│   │   ├── functions.py       # Function calling endpoints
+│   │   ├── speech.py          # STT/TTS endpoints
+│   │   ├── conversation.py    # AI chat endpoints
+│   │   ├── memory.py          # Memory CRUD endpoints
+│   │   └── websocket.py       # Real-time WebSocket
 │   └── utils/
 │       ├── __init__.py
 │       └── dependencies.py    # FastAPI dependencies
+├── tests/                     # Unit and integration tests
+│   ├── conftest.py
+│   ├── test_function_service.py
+│   ├── test_conversation_service.py
+│   ├── test_speech_services.py
+│   └── test_api_endpoints.py
+├── examples/                  # Client examples
+│   ├── python_client.py
+│   └── javascript_client.js
 ├── main.py                    # Application entry point
 ├── requirements.txt           # Python dependencies
+├── pytest.ini                 # Test configuration
+├── Dockerfile                 # Container configuration
+├── docker-compose.yml         # Docker Compose setup
 ├── .env.example              # Environment variables template
 ├── .gitignore
 └── README.md
@@ -144,6 +198,13 @@ Eva-v0.1/
    API_SECRET_KEY=your-super-secret-key
    ```
 
+   Optional variables (for speech and AI features):
+   ```env
+   TTS_ENGINE=google      # Options: google, custom
+   STT_ENGINE=whisper     # Options: whisper, google
+   OPENAI_API_KEY=your-openai-api-key  # Required for AI chat and Whisper STT
+   ```
+
 5. **Run the application**
    ```bash
    python main.py
@@ -152,6 +213,11 @@ Eva-v0.1/
    Or with uvicorn directly:
    ```bash
    uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+6. **Run tests**
+   ```bash
+   pytest tests/ -v
    ```
 
 ## API Documentation
@@ -185,6 +251,36 @@ Once running, access the interactive API documentation at:
 - `GET /functions` - List available functions
 - `POST /functions/call` - Execute a function
 - `GET /functions/history` - Get function call history
+
+#### Speech (STT/TTS)
+- `POST /speech/transcribe` - Transcribe audio file to text
+- `POST /speech/transcribe/base64` - Transcribe base64 audio to text
+- `GET /speech/stt/engines` - List available STT engines
+- `POST /speech/synthesize` - Convert text to speech audio
+- `GET /speech/tts/engines` - List available TTS engines
+- `GET /speech/tts/voices` - List available TTS voices
+
+#### Conversation (AI Chat)
+- `POST /conversation/chat` - Send message and get AI response
+- `GET /conversation/history` - Get conversation history
+- `DELETE /conversation/history` - Clear conversation history
+- `POST /conversation/intent` - Analyze message intent
+- `POST /conversation/compress-memory` - Compress short-term to long-term memory
+
+#### Memory
+- `POST /memory` - Save information to long-term memory
+- `GET /memory` - Get long-term memories
+- `GET /memory/search` - Search memories by keyword
+- `GET /memory/{memory_id}` - Get specific memory
+- `PUT /memory/{memory_id}` - Update a memory
+- `DELETE /memory/{memory_id}` - Delete a memory
+- `GET /memory/context/recent` - Get recent short-term context
+- `DELETE /memory/context` - Clear short-term context
+- `POST /memory/summarize` - Summarize conversations with AI
+- `POST /memory/compress` - Compress to long-term memory
+
+#### WebSocket
+- `WS /ws/speech/{device_id}` - Real-time speech communication
 
 ## Usage Examples
 
@@ -241,7 +337,63 @@ Response:
 }
 ```
 
-### 3. Create a Session for Cross-Device Sync
+### 3. Chat with Eva (AI Conversation)
+
+```bash
+curl -X POST "http://localhost:8000/conversation/chat" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What can you help me with today?",
+    "include_memory": true
+  }'
+```
+
+Response:
+```json
+{
+  "success": true,
+  "message": "Hello! I'm Eva, your personal assistant. I can help you with...",
+  "model": "gpt-3.5-turbo",
+  "usage": {
+    "prompt_tokens": 150,
+    "completion_tokens": 80,
+    "total_tokens": 230
+  }
+}
+```
+
+### 4. Text-to-Speech (Synthesize)
+
+```bash
+curl -X POST "http://localhost:8000/speech/synthesize?text=Hello%20World&language=en-US" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+Response:
+```json
+{
+  "audio_base64": "//uQxAAAAAANIAAAAAE...",
+  "content_type": "audio/mp3",
+  "duration_seconds": 0.8,
+  "engine": "google"
+}
+```
+
+### 5. Save Memory
+
+```bash
+curl -X POST "http://localhost:8000/memory" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "preference",
+    "content": "User prefers dark mode",
+    "importance": 7
+  }'
+```
+
+### 6. Create a Session for Cross-Device Sync
 
 ```bash
 curl -X POST "http://localhost:8000/sessions" \
@@ -254,6 +406,29 @@ curl -X POST "http://localhost:8000/sessions" \
       "last_message": "Hello Eva"
     }
   }'
+```
+
+### 7. WebSocket Connection
+
+```javascript
+// Connect to WebSocket with authentication
+const ws = new WebSocket('ws://localhost:8000/ws/speech/device_001?token=YOUR_JWT_TOKEN');
+
+ws.onopen = () => {
+  console.log('Connected to Eva');
+  
+  // Send a chat message
+  ws.send(JSON.stringify({
+    type: 'chat',
+    message: 'Hello Eva!',
+    include_audio: true
+  }));
+};
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log('Response:', data);
+};
 ```
 
 ## Extending Eva

@@ -200,12 +200,24 @@ class MemoryService:
         else:
             query = collection
         
-        docs = query.stream()
+        # Use batch delete for better performance
+        db = self._get_db()
+        batch = db.batch()
+        docs = list(query.stream())
         count = 0
         
         for doc in docs:
-            doc.reference.delete()
+            batch.delete(doc.reference)
             count += 1
+            
+            # Firestore batch has a limit of 500 operations
+            if count % 500 == 0:
+                batch.commit()
+                batch = db.batch()
+        
+        # Commit remaining deletes
+        if count % 500 != 0:
+            batch.commit()
         
         return count
     

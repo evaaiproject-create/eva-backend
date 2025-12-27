@@ -4,6 +4,7 @@ Handles STT (Speech-to-Text) and TTS (Text-to-Speech) operations.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import Response
+from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import base64
 
@@ -73,11 +74,16 @@ async def transcribe_audio(
         )
 
 
+class TranscribeBase64Request(BaseModel):
+    """Request model for base64 audio transcription."""
+    audio_base64: str
+    language: str = "en-US"
+    engine: Optional[str] = None
+
+
 @router.post("/transcribe/base64", response_model=Dict[str, Any])
 async def transcribe_audio_base64(
-    audio_base64: str,
-    language: str = "en-US",
-    engine: Optional[str] = None,
+    request: TranscribeBase64Request,
     current_user: User = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
@@ -86,9 +92,7 @@ async def transcribe_audio_base64(
     Alternative to file upload for WebSocket or embedded audio.
     
     Args:
-        audio_base64: Base64 encoded audio data
-        language: Language code
-        engine: Optional engine override
+        request: TranscribeBase64Request with audio_base64, language, engine
         current_user: Authenticated user
         
     Returns:
@@ -96,7 +100,7 @@ async def transcribe_audio_base64(
     """
     try:
         # Decode base64
-        audio_data = base64.b64decode(audio_base64)
+        audio_data = base64.b64decode(request.audio_base64)
         
         if not audio_data:
             raise HTTPException(
@@ -107,8 +111,8 @@ async def transcribe_audio_base64(
         # Transcribe
         result = await stt_service.transcribe(
             audio_data=audio_data,
-            language=language,
-            engine=engine
+            language=request.language,
+            engine=request.engine
         )
         
         if "error" in result:

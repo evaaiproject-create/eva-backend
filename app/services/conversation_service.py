@@ -229,23 +229,23 @@ When responding:
             "confidence": 0.7
         }
         
-        # Check for acknowledgment
-        if message_lower in acknowledgments or len(message_lower.split()) <= 2:
-            for ack in acknowledgments:
-                if ack in message_lower:
-                    intent["is_acknowledgment"] = True
-                    intent["type"] = "acknowledgment"
-                    intent["confidence"] = 0.9
-                    break
+        # Check for acknowledgment (exact match or contained in message)
+        for ack in acknowledgments:
+            if message_lower == ack or (ack in message_lower and len(message_lower.split()) <= 3):
+                intent["is_acknowledgment"] = True
+                intent["type"] = "acknowledgment"
+                intent["confidence"] = 0.9
+                break
         
-        # Check for command
-        first_word = message_lower.split()[0] if message_lower else ""
-        if first_word in command_prefixes:
-            intent["is_command"] = True
-            intent["type"] = "command"
-            intent["confidence"] = 0.85
+        # Check for command (only if not already classified)
+        if not intent["is_acknowledgment"]:
+            first_word = message_lower.split()[0] if message_lower else ""
+            if first_word in command_prefixes:
+                intent["is_command"] = True
+                intent["type"] = "command"
+                intent["confidence"] = 0.85
         
-        # Check for interruption
+        # Check for interruption (takes precedence)
         for pattern in interrupt_patterns:
             if pattern in message_lower:
                 intent["is_interruption"] = True

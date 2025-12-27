@@ -73,35 +73,33 @@ class WhisperSTTEngine(STTEngine):
         Returns:
             Transcription result dictionary
         """
+        import tempfile
+        temp_path = None
+        
         try:
             client = self._get_client()
             
             # Write audio to temporary file (Whisper API requires file)
-            import tempfile
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
                 f.write(audio_data)
                 temp_path = f.name
             
-            try:
-                with open(temp_path, "rb") as audio_file:
-                    # Language code mapping (e.g., "en-US" -> "en")
-                    lang_code = language.split("-")[0] if "-" in language else language
-                    
-                    response = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio_file,
-                        language=lang_code
-                    )
-                    
-                    return {
-                        "text": response.text,
-                        "confidence": 1.0,  # Whisper doesn't provide confidence
-                        "language": language,
-                        "engine": "whisper"
-                    }
-            finally:
-                # Clean up temp file
-                os.unlink(temp_path)
+            with open(temp_path, "rb") as audio_file:
+                # Language code mapping (e.g., "en-US" -> "en")
+                lang_code = language.split("-")[0] if "-" in language else language
+                
+                response = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file,
+                    language=lang_code
+                )
+                
+                return {
+                    "text": response.text,
+                    "confidence": 1.0,  # Whisper doesn't provide confidence
+                    "language": language,
+                    "engine": "whisper"
+                }
                 
         except Exception as e:
             return {
@@ -111,6 +109,10 @@ class WhisperSTTEngine(STTEngine):
                 "engine": "whisper",
                 "error": str(e)
             }
+        finally:
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
     
     def get_name(self) -> str:
         return "whisper"
