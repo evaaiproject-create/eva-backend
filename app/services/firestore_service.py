@@ -1,354 +1,222 @@
-"""
-Firestore service for data persistence.
-Handles all interactions with Google Cloud Firestore.
-"""
-from google.cloud import firestore
-from google.cloud.firestore_v1.base_query import FieldFilter
-from typing import Optional, List, Dict, Any
-from datetime import datetime
-import os
-
-from app.config import settings
-from app.models import User, SessionData
-
-
-class FirestoreService:
-    """
-    Service class for Firestore operations.
+    # ================================================================================
+    # CHAT MESSAGE OPERATIONS
+    # ================================================================================
+    # These methods handle storing and retrieving chat messages.
+    # Messages are stored in Firestore for:
+    # - Cross-device sync (see chats on all your devices)
+    # - Chat history (reload and see previous messages)
+    # - Backup (messages survive app crashes/reinstalls)
+    # ================================================================================
     
-    This service manages:
-    - User data storage and retrieval
-    - Session data for cross-device sync
-    - Function call history
-    - User preferences
-    
-    Collections:
-        - users: User profiles and settings
-        - sessions: Active sessions for cross-device sync
-        - function_calls: History of function invocations
-    """
-    
-    def __init__(self):
+    async def save_chat_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        message_id: str,
+        content: str,
+        role: str,
+        timestamp: datetime
+    ) -> None:
         """
-        Initialize Firestore client.
-        Uses credentials from GOOGLE_APPLICATION_CREDENTIALS env var.
+        Save a chat message to Firestore.
+        
+        FIRESTORE STRUCTURE:
+            Collection: chat_messages
+            Document ID: {user_id}_{conversation_id}_{message_id}
+            Fields:
+                - user_id: Who this message belongs to
+                - conversation_id: Which conversation
+                - message_id: Unique message identifier
+                - content: The actual text
+                - role: "user" or "assistant"
+                - timestamp: When it was sent
+        
+        PARAMETERS:
+            user_id: The user who owns this message
+            conversation_id: Which conversation this belongs to
+            message_id: Unique identifier for this message
+            content: The message text
+            role: "user" for user messages, "assistant" for EVA's responses
+            timestamp: When the message was created
         """
-        self._db = None
-        self._users_collection = None
-        self._sessions_collection = None
-        self._function_calls_collection = None
-    
-    def _initialize(self):
-        """Lazy initialization of Firestore client."""
-        if self._db is not None:
-            return
-        
-        # Set credentials path if specified in settings
-        if settings.google_application_credentials:
-            creds_path = settings.google_application_credentials
-            if not os.path.isabs(creds_path):
-                # Make path absolute relative to project root
-                creds_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), creds_path)
-            
-            if os.path.exists(creds_path):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
-        
-        self._db = firestore.Client(project=settings.google_cloud_project)
-        
-        # Collection references
-        self._users_collection = self._db.collection("users")
-        self._sessions_collection = self._db.collection("sessions")
-        self._function_calls_collection = self._db.collection("function_calls")
-    
-    @property
-    def db(self):
-        """Get Firestore database client (lazy-loaded)."""
+        # Lazy initialize if needed
         self._initialize()
-        return self._db
-    
-    @property
-    def users_collection(self):
-        """Get users collection (lazy-loaded)."""
-        self._initialize()
-        return self._users_collection
-    
-    @property
-    def sessions_collection(self):
-        """Get sessions collection (lazy-loaded)."""
-        self._initialize()
-        return self._sessions_collection
-    
-    @property
-    def function_calls_collection(self):
-        """Get function_calls collection (lazy-loaded)."""
-        self._initialize()
-        return self._function_calls_collection
-    
-    # ==================== User Operations ====================
-    
-    async def create_user(self, user: User) -> User:
-        """
-        Create a new user in Firestore.
         
-        Args:
-            user: User object to create
-            
-        Returns:
-            Created user object
-            
-        Raises:
-            Exception if user already exists
-        """
-        user_ref = self.users_collection.document(user.uid)
+        # Create document reference
+        doc_id = f"{user_id}_{conversation_id}_{message_id}"
+        doc_ref = self.db.collection("chat_messages").document(doc_id)
         
-        # Check if user already exists
-        if user_ref.get().exists:
-            raise ValueError(f"User {user.uid} already exists")
-        
-        # Create user document
-        user_dict = user.model_dump(mode='json')
-        user_ref.set(user_dict)
-        
-        return user
-    
-    async def get_user(self, uid: str) -> Optional[User]:
-        """
-        Get user by UID.
-        
-        Args:
-            uid: User unique identifier
-            
-        Returns:
-            User object or None if not found
-        """
-        user_ref = self.users_collection.document(uid)
-        user_doc = user_ref.get()
-        
-        if not user_doc.exists:
-            return None
-        
-        user_data = user_doc.to_dict()
-        return User(**user_data)
-    
-    async def update_user(self, uid: str, update_data: Dict[str, Any]) -> Optional[User]:
-        """
-        Update user data.
-        
-        Args:
-            uid: User unique identifier
-            update_data: Dictionary of fields to update
-            
-        Returns:
-            Updated user object or None if not found
-        """
-        user_ref = self.users_collection.document(uid)
-        
-        if not user_ref.get().exists:
-            return None
-        
-        # Add updated_at timestamp
-        update_data["last_login"] = datetime.utcnow()
-        user_ref.update(update_data)
-        
-        return await self.get_user(uid)
-    
-    async def get_all_users(self) -> List[User]:
-        """
-        Get all users in the system.
-        
-        Returns:
-            List of all users
-        """
-        users = []
-        docs = self.users_collection.stream()
-        
-        for doc in docs:
-            user_data = doc.to_dict()
-            users.append(User(**user_data))
-        
-        return users
-    
-    async def count_users(self) -> int:
-        """
-        Count total number of users.
-        
-        Returns:
-            Number of users in the system
-        """
-        users = await self.get_all_users()
-        return len(users)
-    
-    async def add_device_to_user(self, uid: str, device_id: str) -> Optional[User]:
-        """
-        Add a device to user's device list.
-        
-        Args:
-            uid: User unique identifier
-            device_id: Device identifier to add
-            
-        Returns:
-            Updated user object or None if not found
-        """
-        user = await self.get_user(uid)
-        if not user:
-            return None
-        
-        if device_id not in user.devices:
-            user.devices.append(device_id)
-            return await self.update_user(uid, {"devices": user.devices})
-        
-        return user
-    
-    # ==================== Session Operations ====================
-    
-    async def create_session(self, session: SessionData) -> SessionData:
-        """
-        Create a new session for cross-device sync.
-        
-        Args:
-            session: SessionData object to create
-            
-        Returns:
-            Created session object
-        """
-        session_ref = self.sessions_collection.document(session.session_id)
-        session_dict = session.model_dump(mode='json')
-        session_ref.set(session_dict)
-        
-        return session
-    
-    async def get_session(self, session_id: str) -> Optional[SessionData]:
-        """
-        Get session by ID.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            SessionData object or None if not found
-        """
-        session_ref = self.sessions_collection.document(session_id)
-        session_doc = session_ref.get()
-        
-        if not session_doc.exists:
-            return None
-        
-        session_data = session_doc.to_dict()
-        return SessionData(**session_data)
-    
-    async def update_session(self, session_id: str, data: Dict[str, Any]) -> Optional[SessionData]:
-        """
-        Update session data.
-        
-        Args:
-            session_id: Session identifier
-            data: Data to merge into session
-            
-        Returns:
-            Updated session object or None if not found
-        """
-        session_ref = self.sessions_collection.document(session_id)
-        
-        if not session_ref.get().exists:
-            return None
-        
-        update_data = {
-            "data": data,
-            "updated_at": datetime.utcnow()
-        }
-        session_ref.update(update_data)
-        
-        return await self.get_session(session_id)
-    
-    async def get_user_sessions(self, user_id: str) -> List[SessionData]:
-        """
-        Get all sessions for a user.
-        
-        Args:
-            user_id: User identifier
-            
-        Returns:
-            List of user's sessions
-        """
-        sessions = []
-        query = self.sessions_collection.where(filter=FieldFilter("user_id", "==", user_id))
-        docs = query.stream()
-        
-        for doc in docs:
-            session_data = doc.to_dict()
-            sessions.append(SessionData(**session_data))
-        
-        return sessions
-    
-    async def delete_session(self, session_id: str) -> bool:
-        """
-        Delete a session.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            True if deleted, False if not found
-        """
-        session_ref = self.sessions_collection.document(session_id)
-        
-        if not session_ref.get().exists:
-            return False
-        
-        session_ref.delete()
-        return True
-    
-    # ==================== Function Call History ====================
-    
-    async def log_function_call(self, function_name: str, parameters: Dict[str, Any], 
-                                user_id: str, result: Dict[str, Any]) -> str:
-        """
-        Log a function call for history/analytics.
-        
-        Args:
-            function_name: Name of the function called
-            parameters: Parameters passed to function
-            user_id: User who made the call
-            result: Result of the function call
-            
-        Returns:
-            Document ID of the logged call
-        """
-        call_data = {
-            "function_name": function_name,
-            "parameters": parameters,
+        # Save the message
+        doc_ref.set({
             "user_id": user_id,
-            "result": result,
-            "timestamp": datetime.utcnow()
-        }
-        
-        doc_ref = self.function_calls_collection.add(call_data)
-        return doc_ref[1].id
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "content": content,
+            "role": role,
+            "timestamp": timestamp.isoformat()
+        })
     
-    async def get_user_function_history(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    async def get_chat_messages(
+        self,
+        user_id: str,
+        conversation_id: str,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
         """
-        Get function call history for a user.
+        Get chat messages for a conversation.
         
-        Args:
-            user_id: User identifier
-            limit: Maximum number of records to return
-            
-        Returns:
-            List of function call records
+        RETURNS:
+            List of message dictionaries, ordered by timestamp (oldest first)
+        
+        PARAMETERS:
+            user_id: The user to get messages for
+            conversation_id: Which conversation
+            limit: Maximum number of messages to return
         """
-        query = (self.function_calls_collection
-                .where(filter=FieldFilter("user_id", "==", user_id))
-                .order_by("timestamp", direction=firestore.Query.DESCENDING)
-                .limit(limit))
+        self._initialize()
+        
+        # Query messages for this conversation
+        query = (
+            self.db.collection("chat_messages")
+            .where("user_id", "==", user_id)
+            .where("conversation_id", "==", conversation_id)
+            .order_by("timestamp")
+            .limit(limit)
+        )
         
         docs = query.stream()
-        history = []
         
+        return [doc.to_dict() for doc in docs]
+    
+    async def create_conversation(
+        self,
+        user_id: str,
+        conversation_id: str,
+        title: str,
+        created_at: datetime
+    ) -> None:
+        """
+        Create a new conversation record.
+        
+        FIRESTORE STRUCTURE:
+            Collection: conversations
+            Document ID: {user_id}_{conversation_id}
+        """
+        self._initialize()
+        
+        doc_id = f"{user_id}_{conversation_id}"
+        doc_ref = self.db.collection("conversations").document(doc_id)
+        
+        doc_ref.set({
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "title": title,
+            "created_at": created_at.isoformat(),
+            "updated_at": created_at.isoformat(),
+            "message_count": 0
+        })
+    
+    async def update_conversation_metadata(
+        self,
+        user_id: str,
+        conversation_id: str,
+        last_message: str
+    ) -> None:
+        """
+        Update conversation metadata (called after each message).
+        
+        UPDATES:
+            - updated_at: Current timestamp
+            - message_count: Increment by 1
+            - last_message: Preview of latest message
+        """
+        self._initialize()
+        
+        doc_id = f"{user_id}_{conversation_id}"
+        doc_ref = self.db.collection("conversations").document(doc_id)
+        
+        # Check if conversation exists
+        if not doc_ref.get().exists:
+            # Create it if it doesn't exist
+            await self.create_conversation(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                title=last_message[:30] + "..." if len(last_message) > 30 else last_message,
+                created_at=datetime.utcnow()
+            )
+        
+        # Update metadata
+        doc_ref.update({
+            "updated_at": datetime.utcnow().isoformat(),
+            "message_count": firestore.Increment(1),
+            "last_message": last_message
+        })
+    
+    async def get_user_conversations(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get all conversations for a user.
+        
+        RETURNS:
+            List of conversation metadata, ordered by most recent first
+        """
+        self._initialize()
+        
+        query = (
+            self.db.collection("conversations")
+            .where("user_id", "==", user_id)
+            .order_by("updated_at", direction=firestore.Query.DESCENDING)
+        )
+        
+        docs = query.stream()
+        
+        conversations = []
         for doc in docs:
-            history.append(doc.to_dict())
+            data = doc.to_dict()
+            # Convert ISO strings back to datetime
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+            data["updated_at"] = datetime.fromisoformat(data["updated_at"])
+            conversations.append(data)
         
-        return history
+        return conversations
+    
+    async def delete_conversation(self, user_id: str, conversation_id: str) -> None:
+        """
+        Delete a conversation and all its messages.
+        
+        WARNING: This is permanent!
+        """
+        self._initialize()
+        
+        # Delete conversation metadata
+        conv_doc_id = f"{user_id}_{conversation_id}"
+        self.db.collection("conversations").document(conv_doc_id).delete()
+        
+        # Delete all messages in this conversation
+        messages_query = (
+            self.db.collection("chat_messages")
+            .where("user_id", "==", user_id)
+            .where("conversation_id", "==", conversation_id)
+        )
+        
+        # Delete in batches (Firestore best practice)
+        batch = self.db.batch()
+        docs = messages_query.stream()
+        
+        count = 0
+        for doc in docs:
+            batch.delete(doc.reference)
+            count += 1
+            
+            # Commit every 500 (Firestore limit)
+            if count >= 500:
+                batch.commit()
+                batch = self.db.batch()
+                count = 0
+        
+        # Commit remaining
+        if count > 0:
+            batch.commit()
 
 
-# Global Firestore service instance
-firestore_service = FirestoreService()
+# This line should already exist at the end of your file - don't duplicate it!
+# firestore_service = FirestoreService()
