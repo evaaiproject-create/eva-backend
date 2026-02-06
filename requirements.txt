@@ -1,4 +1,15 @@
+# ================================================================================
+# EVA BACKEND DEPENDENCIES
+# ================================================================================
+# This file lists all Python packages required to run the Eva backend.
+# Install with: pip install -r requirements.txt
+# ================================================================================
+
 # Web Framework
+# -------------
+# FastAPI: Modern, fast web framework for building APIs
+# Uvicorn: ASGI server to run FastAPI
+# Pydantic: Data validation and settings management
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
@@ -7,16 +18,32 @@ pydantic-settings==2.1.0
 email-validator==2.1.0
 
 # Google Cloud Services
+# ---------------------
+# Firestore: NoSQL database for storing users, messages, etc.
+# Auth libraries: For verifying Google OAuth tokens
 google-cloud-firestore==2.13.1
 google-auth==2.23.4
 google-auth-oauthlib==1.1.0
 google-auth-httplib2==0.1.1
 
+# Google Generative AI (Gemini)
+# -----------------------------
+# This is the library for communicating with Gemini AI
+# Used for: Chat responses, voice call conversations
+google-generativeai==0.4.0
+
 # Security & Authentication
+# -------------------------
+# python-jose: JWT token creation and validation
+# passlib: Password hashing (for future features)
+# python-multipart: For handling form data
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 
 # Utilities
+# ---------
+# python-dotenv: Load environment variables from .env file
+# httpx: Modern HTTP client for async requests
 python-dotenv==1.0.0
 httpx==0.25.1
