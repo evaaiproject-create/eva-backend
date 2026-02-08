@@ -4,35 +4,36 @@ GEMINI AI SERVICE FOR EVA
 ================================================================================
 
 PURPOSE:
-    This file is the "brain" of EVA. It handles all communication with Google's 
+    This file is the "brain" of EVA. It handles all communication with Google's
     Gemini AI model. When a user sends a message, this service:
     1. Takes the user's message
     2. Sends it to Google's Gemini AI
     3. Returns the AI's response
 
-WHAT IS GEMINI?
-    Gemini is Google's advanced AI model (similar to ChatGPT). We use the 
-    "gemini-2.0-flash" model which supports:
+GEMINI 2.0 FLASH:
+    We use the "gemini-2.0-flash-exp" model via the new google-genai SDK which
+    supports:
     - Text conversations (chat)
     - Emotional tone detection
     - Real-time streaming responses (for voice calls)
+    - Live API for bidirectional audio streaming (future)
 
-HOW IT WORKS:
-    1. User types "Hello EVA" in the app
-    2. App sends this to our Cloud Run backend
-    3. Backend calls this GeminiService
-    4. GeminiService sends the message to Google's Gemini API
-    5. Gemini responds with intelligent text
-    6. Response flows back to the user's app
+SDK NOTE:
+    This uses the NEW google-genai SDK (from google import genai) which is
+    required for the Gemini 2.0 Live API. This replaces the older
+    google.generativeai SDK.
+
+    Install with: pip install google-genai
 
 CONFIGURATION:
     - Uses GOOGLE_API_KEY from environment variables
-    - Model: gemini-2.0-flash (chosen for speed + emotional intelligence)
+    - Model: gemini-2.0-flash-exp (chosen for speed + Live API support)
 
 ================================================================================
 """
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from typing import Optional, AsyncGenerator, Dict, Any, List
 from datetime import datetime
 import asyncio
@@ -40,259 +41,303 @@ import asyncio
 from app.config import settings
 
 
+# ==============================================================================
+# EVA SYSTEM INSTRUCTION
+# ==============================================================================
+# This tells the AI how to behave in every conversation.
+# Extracted as a module-level constant so it can be reused across
+# both regular chat and live sessions.
+# ==============================================================================
+
+EVA_SYSTEM_INSTRUCTION = """
+You are EVA, a personal AI assistant inspired by JARVIS and Baymax.
+
+YOUR PERSONALITY:
+- Warm, friendly, and approachable (like Baymax)
+- Intelligent and capable (like JARVIS)
+- Concise but helpful - don't be overly verbose
+- Use a conversational tone, not robotic
+
+YOUR CAPABILITIES:
+- You can help with questions, tasks, and conversation
+- You remember context within a conversation
+- You can detect emotional tone and respond appropriately
+
+GUIDELINES:
+- Keep responses concise unless the user asks for detail
+- Be proactive in offering help when appropriate
+- If you don't know something, say so honestly
+- Never pretend to have capabilities you don't have
+
+RESPONSE STYLE:
+- For simple questions: 1-2 sentences
+- For explanations: Use bullet points or numbered lists
+- For emotional support: Be empathetic and understanding
+"""
+
+
 class GeminiService:
     """
     Service class for interacting with Google's Gemini AI.
-    
+
     This class manages:
-    - Initializing the Gemini AI model
+    - Initializing the Gemini AI client (new google-genai SDK)
     - Sending messages and receiving responses
     - Maintaining conversation history for context
     - Streaming responses for real-time voice calls
-    
+    - Live API sessions for bidirectional audio (future)
+
     ATTRIBUTES:
-        model_name (str): The Gemini model version we're using
-        model: The initialized Gemini model object
-        system_instruction (str): EVA's personality and behavior instructions
-    
+        model_id (str): The Gemini model version we're using
+        client: The google-genai Client instance
+
     USAGE EXAMPLE:
         service = GeminiService()
         response = await service.send_message("Hello!", user_id="user123")
         print(response)  # "Hello! I'm EVA, how can I help you today?"
     """
-    
+
     def __init__(self):
         """
         Initialize the Gemini AI service.
-        
+
         WHAT THIS DOES:
-            1. Configures the Google AI library with our API key
+            1. Creates a google-genai Client with the API key
             2. Sets up EVA's personality (system instruction)
-            3. Creates the AI model instance
-        
+            3. Validates the API key is present
+
         NOTE: The API key comes from the GOOGLE_API_KEY environment variable.
               This is set in your .env file or Cloud Run configuration.
         """
-        # Configure the Google AI library with our API key
-        # This key authenticates us with Google's AI services
-        genai.configure(api_key=settings.google_api_key)
-        
-        # The model name - using Gemini 2.0 Flash for:
+        # Validate API key at startup
+        if not settings.google_api_key:
+            print(
+                "⚠️  WARNING: GOOGLE_API_KEY is not set. "
+                "Gemini AI calls will fail. "
+                "Set it via environment variable on Cloud Run."
+            )
+
+        # Create the google-genai client
+        # http_options with api_version='v1alpha' is required for Live API features
+        self.client = genai.Client(
+            api_key=settings.google_api_key,
+            http_options={"api_version": "v1alpha"},
+        )
+
+        # The model ID — using Gemini 2.0 Flash Exp for:
         # - Fast response times (important for real-time chat)
+        # - Live API support (bidirectional audio streaming)
         # - Emotional tone detection (understands user's mood)
         # - Cost efficiency (flash models are cheaper)
-        self.model_name = "gemini-2.0-flash"
-        
-        # EVA's personality and behavior instructions
-        # This tells the AI how to behave in conversations
-        # Think of it like giving an actor their character description
-        self.system_instruction = """
-        You are EVA, a personal AI assistant inspired by JARVIS and Baymax.
-        
-        YOUR PERSONALITY:
-        - Warm, friendly, and approachable (like Baymax)
-        - Intelligent and capable (like JARVIS)
-        - Concise but helpful - don't be overly verbose
-        - Use a conversational tone, not robotic
-        
-        YOUR CAPABILITIES:
-        - You can help with questions, tasks, and conversation
-        - You remember context within a conversation
-        - You can detect emotional tone and respond appropriately
-        
-        GUIDELINES:
-        - Keep responses concise unless the user asks for detail
-        - Be proactive in offering help when appropriate
-        - If you don't know something, say so honestly
-        - Never pretend to have capabilities you don't have
-        
-        RESPONSE STYLE:
-        - For simple questions: 1-2 sentences
-        - For explanations: Use bullet points or numbered lists
-        - For emotional support: Be empathetic and understanding
-        """
-        
-        # Create the Gemini model instance
-        # This is the actual AI we'll be talking to
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            system_instruction=self.system_instruction
-        )
-        
-        # Store for active chat sessions
-        # Key: user_id, Value: chat session object
+        self.model_id = "gemini-2.0-flash-exp"
+
+        # System instruction for EVA's personality
+        self.system_instruction = EVA_SYSTEM_INSTRUCTION
+
+        # Store for conversation histories
+        # Key: "user_id:conversation_id", Value: list of content dicts
         # This allows us to maintain conversation history per user
-        self._chat_sessions: Dict[str, Any] = {}
-    
-    def _get_or_create_chat(self, user_id: str, conversation_id: Optional[str] = None):
+        self._conversation_histories: Dict[str, List[types.Content]] = {}
+
+    # ==========================================================================
+    # CONVERSATION HISTORY MANAGEMENT
+    # ==========================================================================
+
+    def _get_session_key(
+        self, user_id: str, conversation_id: Optional[str] = None
+    ) -> str:
+        """Build a unique key for a user's conversation."""
+        return f"{user_id}:{conversation_id or 'default'}"
+
+    def _get_history(
+        self, user_id: str, conversation_id: Optional[str] = None
+    ) -> List[types.Content]:
         """
-        Get an existing chat session or create a new one.
-        
-        WHAT THIS DOES:
-            Each user can have multiple conversations. This method:
-            1. Checks if a chat session already exists for this user+conversation
-            2. If yes, returns it (so the AI remembers the conversation history)
-            3. If no, creates a new one
-        
-        PARAMETERS:
-            user_id (str): The unique identifier for the user
-            conversation_id (str, optional): Specific conversation ID
-                                            If None, uses "default"
-        
-        RETURNS:
-            A chat session object that maintains conversation history
-        
+        Get the conversation history for a user, creating an empty one if needed.
+
         WHY THIS MATTERS:
-            Without this, the AI would forget everything between messages.
-            With this, it can say things like "As I mentioned earlier..."
+            Without history, the AI forgets everything between messages.
+            With history, it can say things like "As I mentioned earlier..."
         """
-        # Create a unique key for this user's conversation
-        session_key = f"{user_id}:{conversation_id or 'default'}"
-        
-        # Check if we already have a chat session for this key
-        if session_key not in self._chat_sessions:
-            # No existing session - create a new one
-            # start_chat() creates a new conversation with empty history
-            self._chat_sessions[session_key] = self.model.start_chat(history=[])
-        
-        return self._chat_sessions[session_key]
-    
-    async def send_message(
-        self, 
-        message: str, 
+        key = self._get_session_key(user_id, conversation_id)
+        if key not in self._conversation_histories:
+            self._conversation_histories[key] = []
+        return self._conversation_histories[key]
+
+    def _append_to_history(
+        self,
         user_id: str,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str],
+        role: str,
+        text: str,
+    ) -> None:
+        """Append a message to the conversation history."""
+        history = self._get_history(user_id, conversation_id)
+        history.append(
+            types.Content(
+                role=role,
+                parts=[types.Part.from_text(text=text)],
+            )
+        )
+
+    # ==========================================================================
+    # TEXT CHAT — regular request/response
+    # ==========================================================================
+
+    async def send_message(
+        self,
+        message: str,
+        user_id: str,
+        conversation_id: Optional[str] = None,
     ) -> str:
         """
         Send a message to EVA and get a response.
-        
-        THIS IS THE MAIN METHOD - Used for regular text chat.
-        
+
+        THIS IS THE MAIN METHOD — Used for regular text chat.
+
         PARAMETERS:
-            message (str): What the user said (e.g., "What's the weather?")
-            user_id (str): Who is asking (e.g., "user_abc123")
-            conversation_id (str, optional): Which conversation this belongs to
-        
+            message: What the user said (e.g., "What's the weather?")
+            user_id: Who is asking (e.g., "user_abc123")
+            conversation_id: Which conversation this belongs to
+
         RETURNS:
-            str: EVA's response text
-        
-        EXAMPLE:
-            response = await gemini_service.send_message(
-                message="Hello EVA!",
-                user_id="user123"
-            )
-            # response = "Hello! I'm EVA, your personal assistant. How can I help?"
-        
+            EVA's response text
+
         ERROR HANDLING:
             If something goes wrong (API error, network issue), this catches
             the error and returns a friendly error message instead of crashing.
         """
         try:
-            # Get the chat session for this user
-            # This maintains conversation history
-            chat = self._get_or_create_chat(user_id, conversation_id)
-            
-            # Send the message to Gemini and wait for response
-            # send_message_async is non-blocking (good for performance)
-            response = await chat.send_message_async(message)
-            
-            # Extract and return the text from the response
-            return response.text
-            
+            # Build the contents list: history + new user message
+            history = self._get_history(user_id, conversation_id)
+
+            # Create the new user message
+            user_content = types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=message)],
+            )
+
+            # Full contents = history + current message
+            contents = history + [user_content]
+
+            # Call Gemini
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model_id,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_instruction,
+                ),
+            )
+
+            response_text = response.text
+
+            # Persist both messages in history for future context
+            self._append_to_history(user_id, conversation_id, "user", message)
+            self._append_to_history(
+                user_id, conversation_id, "model", response_text
+            )
+
+            return response_text
+
         except Exception as e:
-            # Log the error for debugging
-            print(f"Gemini API Error: {str(e)}")
-            
-            # Return a friendly error message to the user
-            # Don't expose technical details to end users
-            return "I'm sorry, I encountered an issue processing your request. Please try again."
-    
+            print(f"Gemini API Error: {e}")
+            return (
+                "I'm sorry, I encountered an issue processing your request. "
+                "Please try again."
+            )
+
+    # ==========================================================================
+    # STREAMING CHAT — for reduced latency / SSE endpoints
+    # ==========================================================================
+
     async def send_message_stream(
-        self, 
-        message: str, 
+        self,
+        message: str,
         user_id: str,
-        conversation_id: Optional[str] = None
+        conversation_id: Optional[str] = None,
     ) -> AsyncGenerator[str, None]:
         """
         Send a message and stream the response in real-time.
-        
-        THIS IS FOR VOICE CALLS - Streams words as they're generated.
-        
+
+        THIS IS FOR VOICE CALLS — Streams words as they're generated.
+
         WHAT IS STREAMING?
             Instead of waiting for the complete response, we get words
-            as the AI generates them. This is like:
-            - Normal: Wait 3 seconds, then get "Hello, how are you today?"
-            - Streaming: Get "Hello," then ", how" then " are you" then " today?"
-        
-        WHY USE STREAMING?
-            For voice calls, we want to speak as soon as possible.
-            Streaming lets us start speaking before the AI finishes thinking.
-        
-        PARAMETERS:
-            message (str): What the user said
-            user_id (str): Who is asking  
-            conversation_id (str, optional): Which conversation
-        
+            as the AI generates them. This reduces perceived latency.
+
         YIELDS:
-            str: Chunks of text as they're generated
-        
+            Chunks of text as they're generated
+
         EXAMPLE:
-            async for chunk in gemini_service.send_message_stream("Tell me a story", "user123"):
-                print(chunk, end="")  # Prints each word as it arrives
+            async for chunk in gemini_service.send_message_stream(
+                "Tell me a story", "user123"
+            ):
+                print(chunk, end="")
         """
         try:
-            # Get the chat session
-            chat = self._get_or_create_chat(user_id, conversation_id)
-            
-            # Send message and get streaming response
-            response = await chat.send_message_async(message, stream=True)
-            
-            # Yield each chunk as it arrives
-            async for chunk in response:
+            history = self._get_history(user_id, conversation_id)
+            user_content = types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=message)],
+            )
+            contents = history + [user_content]
+
+            # Use streaming generation
+            response_stream = self.client.models.generate_content_stream(
+                model=self.model_id,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_instruction,
+                ),
+            )
+
+            full_response = ""
+            for chunk in response_stream:
                 if chunk.text:
+                    full_response += chunk.text
                     yield chunk.text
-                    
+
+            # Persist history after streaming completes
+            self._append_to_history(user_id, conversation_id, "user", message)
+            self._append_to_history(
+                user_id, conversation_id, "model", full_response
+            )
+
         except Exception as e:
-            print(f"Gemini Streaming Error: {str(e)}")
+            print(f"Gemini Streaming Error: {e}")
             yield "I'm sorry, I encountered an issue. Please try again."
-    
-    def clear_conversation(self, user_id: str, conversation_id: Optional[str] = None):
+
+    # ==========================================================================
+    # CONVERSATION MANAGEMENT
+    # ==========================================================================
+
+    def clear_conversation(
+        self, user_id: str, conversation_id: Optional[str] = None
+    ) -> None:
         """
         Clear a user's conversation history.
-        
+
         WHEN TO USE:
-            - User starts a "New Chat" 
+            - User starts a "New Chat"
             - User explicitly asks to "forget" the conversation
             - Conversation gets too long (memory management)
-        
-        PARAMETERS:
-            user_id (str): The user whose conversation to clear
-            conversation_id (str, optional): Specific conversation to clear
-        
-        WHAT HAPPENS:
-            The chat session is deleted. Next message will start fresh
-            with no memory of previous messages.
         """
-        session_key = f"{user_id}:{conversation_id or 'default'}"
-        
-        if session_key in self._chat_sessions:
-            del self._chat_sessions[session_key]
-    
+        key = self._get_session_key(user_id, conversation_id)
+        if key in self._conversation_histories:
+            del self._conversation_histories[key]
+
     def get_active_conversations(self, user_id: str) -> List[str]:
         """
         Get list of active conversation IDs for a user.
-        
+
         RETURNS:
-            List of conversation IDs that have active chat sessions
-        
-        EXAMPLE:
-            conversations = gemini_service.get_active_conversations("user123")
-            # conversations = ["default", "work-chat", "personal-chat"]
+            List of conversation IDs that have in-memory histories
         """
         prefix = f"{user_id}:"
         return [
-            key.replace(prefix, "") 
-            for key in self._chat_sessions.keys() 
+            key.replace(prefix, "")
+            for key in self._conversation_histories
             if key.startswith(prefix)
         ]
 
