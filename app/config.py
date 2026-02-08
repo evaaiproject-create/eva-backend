@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     Used for: Firestore access, other GCP services
     """
     
-    google_client_id: str = ""
+    google_client_id: str = "81503423918-3sujbguhqjn6ns89hjb3858t92aksher.apps.googleusercontent.com"
     """
     OAuth 2.0 Client ID from Google Cloud Console.
     Used for: Verifying Google Sign-In tokens from the Android app
