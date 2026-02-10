@@ -25,7 +25,10 @@ class FirestoreService:
         if self.db is None:
             # If settings.google_cloud_project is empty, firestore.Client() 
             # will attempt to auto-detect from the environment.
-            self.db = firestore.Client(project=settings.google_cloud_project)
+            self.db = firestore.Client(
+                project=settings.google_cloud_project,
+                database="(default)"
+            )
 
     # ================================================================================
     # CHAT MESSAGE OPERATIONS
