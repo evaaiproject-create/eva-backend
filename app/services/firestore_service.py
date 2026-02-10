@@ -27,7 +27,7 @@ class FirestoreService:
             # will attempt to auto-detect from the environment.
             self.db = firestore.Client(
                 project=settings.google_cloud_project,
-                database="(default)"
+                database="default"
             )
 
     # ================================================================================
