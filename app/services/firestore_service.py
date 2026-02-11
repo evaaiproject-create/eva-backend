@@ -108,10 +108,25 @@ class FirestoreService:
     # USER OPERATIONS
     # ================================================================================
 
-    async def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_user(self, user_id: str) -> Optional[Any]:
+        """Retrieve user details and return as a User object."""
         self._initialize()
         doc = self.db.collection("users").document(user_id).get()
-        return doc.to_dict() if doc.exists else None
+        if not doc.exists:
+            return None
+        
+        data = doc.to_dict()
+        
+        # Import here to avoid circular dependencies
+        from app.models import User
+        
+        # Handle cases where Firestore dates were stored as strings
+        if isinstance(data.get("created_at"), str):
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+        if isinstance(data.get("last_login"), str):
+            data["last_login"] = datetime.fromisoformat(data["last_login"])
+            
+        return User(**data)
 
     async def create_user(self, user: Any) -> None:
         """Create a new user. Expects a User model object."""
@@ -119,15 +134,31 @@ class FirestoreService:
         # Convert User model to dict
         user_data = user.dict() if hasattr(user, "dict") else user
         user_id = user_data.get("uid")
+        
+        # Ensure dates are stored in a consistent format
+        if isinstance(user_data.get("created_at"), datetime):
+            user_data["created_at"] = user_data["created_at"].isoformat()
+        if isinstance(user_data.get("last_login"), datetime):
+            user_data["last_login"] = user_data["last_login"].isoformat()
+            
         self.db.collection("users").document(user_id).set(user_data)
 
     async def update_user(self, user_id: str, data: Dict[str, Any]) -> None:
-        """Update existing user data (like last_login)."""
+        """Update existing user data."""
         self._initialize()
-        self.db.collection("users").document(user_id).update(data)
+        
+        # Convert any datetime objects to strings before updating
+        clean_data = {}
+        for k, v in data.items():
+            if isinstance(v, datetime):
+                clean_data[k] = v.isoformat()
+            else:
+                clean_data[k] = v
+                
+        self.db.collection("users").document(user_id).update(clean_data)
 
     async def add_device_to_user(self, user_id: str, device_id: str) -> None:
-        """Add a device ID to the user's list of devices if not present."""
+        """Add a device ID to the user's list of devices."""
         self._initialize()
         self.db.collection("users").document(user_id).update({
             "devices": firestore.ArrayUnion([device_id])
